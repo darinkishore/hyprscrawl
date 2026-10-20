@@ -175,6 +175,12 @@ fn try_hex(audio: &RecordedAudio) -> Result<Option<TranscriptData>> {
 
 fn apple(wav: &Path) -> TranscriptData {
     crate::helper::transcribe(wav).unwrap_or_else(|error| {
+        #[cfg(target_os = "linux")]
+        if crate::linux::voxtype::enabled() {
+            crate::capture::scrawl_log(format!("Voxtype aligned transcription failed: {error:#}"));
+            crate::linux::desktop::notify_simple("Scrawl transcription failed", "Audio is preserved; timed narration is unavailable. See the Scrawl log.");
+            return TranscriptData { source: "voxtype:failed".into(), ..Default::default() };
+        }
         crate::capture::scrawl_log(format!("SpeechAnalyzer failed: {error:#}"));
         TranscriptData {
             source: "offline".into(),

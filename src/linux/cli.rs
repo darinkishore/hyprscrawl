@@ -148,6 +148,11 @@ fn doctor() -> Result<()> {
     if gsr::other_running() {
         row(false, "recorder free", "a gpu-screen-recorder is running now (Omarchy recording?)".into());
     }
+    if crate::linux::voxtype::enabled() {
+        let cli = which("voxtype");
+        row(cli.is_some(), "Voxtype aligned files", cli.map_or("missing: install Voxtype with alignment support".into(), |p| p.display().to_string()));
+        println!("  transcription: Voxtype gpt-transcribe + local acoustic word alignment");
+    } else {
     let cli = whisper::cli();
     row(cli.is_some(), "whisper-cli", cli.map_or("missing: omarchy-pkg-add whisper-cpp (or set SCRAWL_WHISPER_CLI)".into(), |p| p.display().to_string()));
     let model = whisper::model();
@@ -157,6 +162,7 @@ fn doctor() -> Result<()> {
         row(login.is_ok(), "ChatGPT transcription", login.map_or_else(|e| format!("{e:#}"), |()| format!("on ({})", crate::linux::chatgpt::auth_path().display())));
     } else {
         println!("  transcription: local whisper.cpp (`scrawl setup transcription chatgpt` to use your ChatGPT login)");
+    }
     }
     for (what, key) in [("record / stop", daemon::hotkey()), ("paste latest", daemon::paste_hotkey()), ("review latest", daemon::review_hotkey())] {
         println!("  {what:<14} {}", key.map_or("off".into(), |k| daemon::pretty_key(&k)));

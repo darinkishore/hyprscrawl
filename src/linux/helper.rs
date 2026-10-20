@@ -42,7 +42,7 @@ pub fn devices() -> Result<Vec<PhoneDevice>> {
 }
 
 /// Runs a command to completion with a timeout, returning stdout.
-fn output(program: &str, args: &[&std::ffi::OsStr], timeout: Duration) -> Result<Vec<u8>> {
+pub(crate) fn output(program: &str, args: &[&std::ffi::OsStr], timeout: Duration) -> Result<Vec<u8>> {
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -102,16 +102,19 @@ pub fn transcribe(audio: &Path) -> Result<TranscriptData> {
     let prefetched = PREFETCH.lock().unwrap().take_if(|p| p.wav == audio);
     if let Some(prefetched) = prefetched {
         let result = match prefetched.job {
+            Job::Voxtype(handle) => handle.join().unwrap_or_else(|_| Err(anyhow::anyhow!("Voxtype thread panicked"))),
             Job::Cloud(pending) => pending.finish(crate::linux::chatgpt::whisper_grace()),
             Job::Local(handle) => handle.join().unwrap_or_else(|_| Err(anyhow::anyhow!("whisper thread panicked"))),
         };
         let _ = std::fs::remove_file(&prefetched.copy);
+        if crate::linux::voxtype::enabled() { return result; }
         match result {
             Ok(transcript) => return Ok(transcript),
             Err(error) => crate::capture::scrawl_log(format!("prefetched transcription failed, using whisper.cpp: {error:#}")),
         }
         return crate::linux::whisper::transcribe(audio);
     }
+    if crate::linux::voxtype::enabled() { return crate::linux::voxtype::transcribe(audio); }
     if crate::linux::chatgpt::enabled() {
         match crate::linux::chatgpt::transcribe(audio) {
             Ok(transcript) => return Ok(transcript),
@@ -122,6 +125,7 @@ pub fn transcribe(audio: &Path) -> Result<TranscriptData> {
 }
 
 enum Job {
+    Voxtype(std::thread::JoinHandle<Result<TranscriptData>>),
     Cloud(crate::linux::chatgpt::Pending),
     Local(std::thread::JoinHandle<Result<TranscriptData>>),
 }
@@ -144,7 +148,10 @@ pub fn prefetch(wav: &Path) -> Result<()> {
     let copy = dir.join(format!("prefetch-{}.wav", crate::make_bundle_id()));
     std::fs::copy(wav, &copy)?;
     let local = |copy: PathBuf| Job::Local(std::thread::spawn(move || crate::linux::whisper::transcribe(&copy)));
-    let job = if crate::linux::chatgpt::enabled() {
+    let job = if crate::linux::voxtype::enabled() {
+        let copy = copy.clone();
+        Job::Voxtype(std::thread::spawn(move || crate::linux::voxtype::transcribe(&copy)))
+    } else if crate::linux::chatgpt::enabled() {
         match crate::linux::chatgpt::start(&copy) {
             Ok(pending) => Job::Cloud(pending),
             Err(error) => {

@@ -590,6 +590,8 @@ pub fn summary_markdown(bundle: &ScrawlBundle, bundle_dir: &std::path::Path) -> 
         for (t, label) in &app_events {
             out.push_str(&format!("· {} {label}\n", format_clock(*t)));
         }
+    } else if bundle.transcript.source == "voxtype:failed" {
+        out.push_str("Timed transcription failed. Audio is preserved; narration and spoken-cue alignment are unavailable.\n");
     } else if !bundle.transcript.text.trim().is_empty() {
         out.push_str(&format!("“{}”\n", bundle.transcript.text.trim()));
     }

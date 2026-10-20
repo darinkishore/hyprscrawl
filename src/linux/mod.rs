@@ -13,3 +13,5 @@ pub mod overlay;
 pub mod review;
 pub mod screencast;
 pub mod whisper;
+
+pub mod voxtype;
