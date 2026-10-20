@@ -186,7 +186,7 @@ pub struct Monitor {
     pub focused: bool,
     #[serde(rename = "activeWorkspace")]
     pub active_workspace: WorkspaceRef,
-    #[serde(rename = "specialWorkspace", default)]
+    #[serde(rename = "specialWorkspace", default, deserialize_with = "special_workspace")]
     pub special_workspace: Option<WorkspaceRef>,
 }
 
@@ -195,6 +195,20 @@ pub struct WorkspaceRef {
     pub id: i64,
     #[serde(default)]
     pub name: String,
+}
+
+// Newer Hyprland represents an absent special workspace with empty metadata
+// and no id. Keep active/real workspace IDs required.
+fn special_workspace<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<WorkspaceRef>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    let Some(value) = value else { return Ok(None) };
+    if value.get("id").is_none()
+        && value.get("name").and_then(|v| v.as_str()) == Some("")
+        && value.get("address").and_then(|v| v.as_str()) == Some("")
+    {
+        return Ok(None);
+    }
+    serde_json::from_value(value).map(Some).map_err(serde::de::Error::custom)
 }
 
 impl Monitor {
@@ -337,4 +351,37 @@ pub fn lua_str(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn monitor(special: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "id": 1, "name": "HDMI-A-1", "width": 5120, "height": 2160,
+            "x": 0, "y": 0, "scale": 1,
+            "activeWorkspace": {"id": 2, "name": "2"},
+            "specialWorkspace": special
+        })
+    }
+
+    #[test]
+    fn accepts_empty_special_workspace_without_an_id() {
+        let m: Monitor = serde_json::from_value(monitor(serde_json::json!({
+            "address": "", "type": "", "name": ""
+        }))).unwrap();
+        assert!(m.special_workspace.is_none());
+        assert_eq!(m.active_workspace.id, 2);
+        let m: Monitor = serde_json::from_value(monitor(serde_json::json!({"id": 0, "name": ""}))).unwrap();
+        assert_eq!(m.special_workspace.unwrap().id, 0);
+    }
+
+    #[test]
+    fn keeps_real_workspace_ids_required() {
+        assert!(serde_json::from_value::<Monitor>(monitor(serde_json::json!({"name": "special:notes"}))).is_err());
+        let mut value = monitor(serde_json::Value::Null);
+        value["activeWorkspace"] = serde_json::json!({"name": "2"});
+        assert!(serde_json::from_value::<Monitor>(value).is_err());
+    }
 }

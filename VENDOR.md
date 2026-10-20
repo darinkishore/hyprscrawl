@@ -22,3 +22,6 @@ Failure keeps the recording, labels the bundle `voxtype:failed`, and notifies.
 
 The Nix installation owns `~/.config/scrawl/config.json` and its systemd unit.
 Change those defaults in nix-config rather than running upstream setup commands.
+
+Hyprland monitor parsing accepts the current empty special-workspace object
+without inventing an ID; real and active workspace IDs remain required.
