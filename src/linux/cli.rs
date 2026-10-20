@@ -136,7 +136,6 @@ fn doctor() -> Result<()> {
         ("ffmpeg", "frames and audio", "ffmpeg"),
         ("ffprobe", "media probing", "ffmpeg"),
         ("wl-copy", "clipboard", "wl-clipboard"),
-        ("wtype", "paste", "wtype"),
     ] {
         let found = which(cmd);
         row(found.is_some(), cmd, found.map_or(format!("missing ({why}): omarchy-pkg-add {pkg}"), |p| p.display().to_string()));

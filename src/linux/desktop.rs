@@ -1,4 +1,4 @@
-//! Clipboard (`wl-copy`), paste (`wtype`), notifications (`omarchy-notification-send`, else
+//! Clipboard (`wl-copy`), paste (window-targeted Hyprland shortcut), notifications (`omarchy-notification-send`, else
 //! `notify-send`) and Omarchy's bar indicator refresh.
 
 use std::io::Write;
@@ -51,19 +51,29 @@ return (d("Shift_L") or d("Shift_R") or d("Control_L") or d("Control_R") or d("A
     }
 }
 
-/// Ctrl+Shift+V in terminals, Ctrl+V elsewhere.
-pub fn paste_into_focused() -> Result<()> {
+/// Send directly to the original window, bypassing compositor bindings. Refuse a
+/// focus change between copying and either paste rather than typing into another app.
+fn paste_into_target(address: &str, terminal: bool) -> Result<()> {
     wait_for_modifiers_released(400);
-    let args: &[&str] = if crate::capture::is_frontmost_terminal() {
-        &["-M", "ctrl", "-M", "shift", "-k", "v", "-m", "shift", "-m", "ctrl"]
-    } else {
-        &["-M", "ctrl", "-k", "v", "-m", "ctrl"]
-    };
-    let status = Command::new("wtype").args(args).status().context("Could not run wtype")?;
-    if !status.success() {
-        bail!("wtype failed");
+    let mods = if terminal { "CTRL SHIFT" } else { "CTRL" };
+    let result = crate::linux::hypr::eval_value(&format!(
+        "local w = hl.get_active_window(); if not w or w.address ~= '{address}' then return 'focus-changed' end; \
+         hl.dispatch(hl.dsp.send_shortcut({{ mods = '{mods}', key = 'V', window = 'address:{address}' }})); return 'sent'"
+    ))?;
+    if result.trim() != "sent" {
+        bail!("Paste cancelled: the focused window changed");
     }
     Ok(())
+}
+
+fn paste_target() -> Result<(String, bool)> {
+    let window: serde_json::Value = crate::linux::hypr::json("activewindow")?;
+    let address = window["address"].as_str().unwrap_or("");
+    if !address.starts_with("0x") || address.len() <= 2 || address == "0x0"
+        || !address[2..].bytes().all(|c| c.is_ascii_hexdigit()) {
+        bail!("No focused window to paste into");
+    }
+    Ok((address.to_owned(), crate::capture::is_frontmost_terminal()))
 }
 
 /// Puts the bundle's summary (transcript, keyframe index, absolute paths) on the clipboard,
@@ -76,20 +86,21 @@ pub fn copy_bundle(bundle_dir: &Path) -> Result<()> {
 /// The contact sheet first (terminals get its path, which agents resolve), then the summary,
 /// pasted in turn into the focused window.
 pub fn paste_bundle(bundle_dir: &Path) -> Result<()> {
+    let (address, terminal) = paste_target()?;
     let (directory, bundle) = crate::handoff::load_bundle(bundle_dir)?;
     let sheet = directory.join(&bundle.contact_sheet);
     let summary = crate::sketch::summary_markdown(&bundle, &directory);
-    if crate::capture::is_frontmost_terminal() {
+    if terminal {
         copy_text(&sheet.display().to_string())?;
     } else {
         copy_png(&std::fs::read(&sheet).context("Could not read contact sheet")?)?;
     }
     std::thread::sleep(std::time::Duration::from_millis(40));
-    paste_into_focused()?;
+    paste_into_target(&address, terminal)?;
     std::thread::sleep(std::time::Duration::from_millis(250));
     copy_text(&summary)?;
     std::thread::sleep(std::time::Duration::from_millis(40));
-    paste_into_focused()
+    paste_into_target(&address, terminal)
 }
 
 pub struct Notice<'a> {
